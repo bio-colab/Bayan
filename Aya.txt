@@ -1,0 +1,308 @@
+#include <Arduino.h>
+
+// Traffic light pins
+const int trafficLightARed = 2;
+const int trafficLightAYellow = 3;
+const int trafficLightAGreen = 4;
+const int trafficLightBRed = 5;
+const int trafficLightBYellow = 6;
+const int trafficLightBGreen = 7;
+const int trafficLightCRed = 8;
+const int trafficLightCYellow = 9;
+const int trafficLightCGreen = 10;
+
+// RF sensor pins (6 sensors total - entry and exit for each road)
+const int rfSensorAEntry = 11;  // Entry sensor for road A
+const int rfSensorAExit = 12;   // Exit sensor for road A
+const int rfSensorBEntry = 13;  // Entry sensor for road B
+const int rfSensorBExit = A0;   // Exit sensor for road B (using analog pin as digital)
+const int rfSensorCEntry = A1;  // Entry sensor for road C
+const int rfSensorCExit = A2;   // Exit sensor for road C
+
+// Previous states of RF sensors
+bool prevRFAEntry = LOW;
+bool prevRFAExit = LOW;
+bool prevRFBEntry = LOW;
+bool prevRFBExit = LOW;
+bool prevRFCEntry = LOW;
+bool prevRFCExit = LOW;
+
+// Car counters for each road
+int carsInRoadA = 0;
+int carsInRoadB = 0;
+int carsInRoadC = 0;
+
+// Timing for traffic light phases
+unsigned long previousMillis = 0;
+unsigned long phaseDuration = 0;
+int currentPhase = 1;
+const unsigned long maxGreenTime = 20000;  // Maximum green time: 20 seconds
+const unsigned long minGreenTime = 5000;   // Minimum green time: 5 seconds
+const unsigned long yellowTime = 3000;     // Yellow light duration: 3 seconds
+
+void setup() {
+ Serial.begin(9600);
+ 
+ // Set traffic light pins as outputs
+ pinMode(trafficLightARed, OUTPUT);
+ pinMode(trafficLightAYellow, OUTPUT);
+ pinMode(trafficLightAGreen, OUTPUT);
+ pinMode(trafficLightBRed, OUTPUT);
+ pinMode(trafficLightBYellow, OUTPUT);
+ pinMode(trafficLightBGreen, OUTPUT);
+ pinMode(trafficLightCRed, OUTPUT);
+ pinMode(trafficLightCYellow, OUTPUT);
+ pinMode(trafficLightCGreen, OUTPUT);
+ 
+ // Set RF sensor pins as inputs
+ pinMode(rfSensorAEntry, INPUT);
+ pinMode(rfSensorAExit, INPUT);
+ pinMode(rfSensorBEntry, INPUT);
+ pinMode(rfSensorBExit, INPUT);
+ pinMode(rfSensorCEntry, INPUT);
+ pinMode(rfSensorCExit, INPUT);
+ 
+ // Start with all red
+ allRed();
+ 
+ // Determine which road gets green first
+ decideNextGreen();
+ 
+ Serial.println("ARDUINO_READY");
+}
+
+// Set all traffic lights to red
+void allRed() {
+ digitalWrite(trafficLightARed, HIGH);
+ digitalWrite(trafficLightAYellow, LOW);
+ digitalWrite(trafficLightAGreen, LOW);
+ digitalWrite(trafficLightBRed, HIGH);
+ digitalWrite(trafficLightBYellow, LOW);
+ digitalWrite(trafficLightBGreen, LOW);
+ digitalWrite(trafficLightCRed, HIGH);
+ digitalWrite(trafficLightCYellow, LOW);
+ digitalWrite(trafficLightCGreen, LOW);
+}
+
+// Decide which road gets green light next based on car presence
+void decideNextGreen() {
+ // Check if there are cars in any road
+ if (carsInRoadA > 0) {
+   setPhase(1); // A gets green
+ } else if (carsInRoadB > 0) {
+   setPhase(3); // B gets green
+ } else if (carsInRoadC > 0) {
+   setPhase(5); // C gets green
+ } else {
+   // If no cars on any road, keep all red and check again soon
+   allRed();
+   phaseDuration = 1000; // Check again after 1 second
+   currentPhase = 0; // Special phase for all red
+ }
+}
+void setPhase(int phase) {
+ // First, set all lights to red
+ digitalWrite(trafficLightARed, HIGH);
+ digitalWrite(trafficLightAYellow, LOW);
+ digitalWrite(trafficLightAGreen, LOW);
+ digitalWrite(trafficLightBRed, HIGH);
+ digitalWrite(trafficLightBYellow, LOW);
+ digitalWrite(trafficLightBGreen, LOW);
+ digitalWrite(trafficLightCRed, HIGH);
+ digitalWrite(trafficLightCYellow, LOW);
+ digitalWrite(trafficLightCGreen, LOW);
+ 
+ currentPhase = phase;
+ 
+ // Set lights and duration for each phase
+ switch (phase) {
+   case 1: // A Green, B Red, C Red
+     digitalWrite(trafficLightARed, LOW);  // Turn off red
+     digitalWrite(trafficLightAGreen, HIGH);
+     // Duration depends on number of cars, with min and max limits
+     phaseDuration = min(maxGreenTime, max(minGreenTime, (unsigned long)(carsInRoadA * 2000)));
+     break;
+     
+   case 2: // A Yellow, B Red, C Red
+     digitalWrite(trafficLightARed, LOW);  // Turn off red
+     digitalWrite(trafficLightAYellow, HIGH);
+     phaseDuration = yellowTime;
+     break;
+     
+   case 3: // A Red, B Green, C Red
+     digitalWrite(trafficLightBRed, LOW);  // Turn off red
+     digitalWrite(trafficLightBGreen, HIGH);
+     // Duration depends on number of cars, with min and max limits
+     phaseDuration = min(maxGreenTime, max(minGreenTime, (unsigned long)(carsInRoadB * 2000)));
+     break;
+     
+   case 4: // A Red, B Yellow, C Red
+     digitalWrite(trafficLightBRed, LOW);  // Turn off red
+     digitalWrite(trafficLightBYellow, HIGH);
+     phaseDuration = yellowTime;
+     break;
+     
+   case 5: // A Red, B Red, C Green
+     digitalWrite(trafficLightCRed, LOW);  // Turn off red
+     digitalWrite(trafficLightCGreen, HIGH);
+     // Duration depends on number of cars, with min and max limits
+     phaseDuration = min(maxGreenTime, max(minGreenTime, (unsigned long)(carsInRoadC * 2000)));
+     break;
+     
+   case 6: // A Red, B Red, C Yellow
+     digitalWrite(trafficLightCRed, LOW);  // Turn off red
+     digitalWrite(trafficLightCYellow, HIGH);
+     phaseDuration = yellowTime;
+     break;
+ }
+}
+void loop() {
+ unsigned long currentMillis = millis();
+ 
+ // Traffic light phase switching
+ if (currentMillis - previousMillis >= phaseDuration) {
+   previousMillis = currentMillis;
+   
+   if (currentPhase == 0) {
+     // We were in all-red checking mode, decide who gets green
+     decideNextGreen();
+   } else {
+     // Normal phase progression
+     if (currentPhase == 1) {
+       // A is green, next is A yellow
+       setPhase(2);
+     } else if (currentPhase == 2) {
+       // After A yellow, check if B has cars
+       if (carsInRoadB > 0) {
+         setPhase(3); // B gets green
+       } else if (carsInRoadC > 0) {
+         setPhase(5); // C gets green
+       } else if (carsInRoadA > 0) {
+         setPhase(1); // A gets green again
+       } else {
+         // No cars anywhere, all red
+         allRed();
+         phaseDuration = 1000;
+         currentPhase = 0;
+       }
+     } else if (currentPhase == 3) {
+       // B is green, next is B yellow
+       setPhase(4);
+     } else if (currentPhase == 4) {
+       // After B yellow, check if C has cars
+       if (carsInRoadC > 0) {
+         setPhase(5); // C gets green
+       } else if (carsInRoadA > 0) {
+         setPhase(1); // A gets green
+       } else if (carsInRoadB > 0) {
+         setPhase(3); // B gets green again
+       } else {
+         // No cars anywhere, all red
+         allRed();
+         phaseDuration = 1000;
+         currentPhase = 0;
+       }
+     } else if (currentPhase == 5) {
+       // C is green, next is C yellow
+       setPhase(6);
+     } else if (currentPhase == 6) {
+       // After C yellow, check if A has cars
+       if (carsInRoadA > 0) {
+         setPhase(1); // A gets green
+       } else if (carsInRoadB > 0) {
+         setPhase(3); // B gets green
+       } else if (carsInRoadC > 0) {
+         setPhase(5); // C gets green again
+       } else {
+         // No cars anywhere, all red
+         allRed();
+         phaseDuration = 1000;
+         currentPhase = 0;
+       }
+     }
+   }
+ }
+ 
+ // Read RF sensor states
+ bool currentRFAEntry = digitalRead(rfSensorAEntry);
+ bool currentRFAExit = digitalRead(rfSensorAExit);
+ bool currentRFBEntry = digitalRead(rfSensorBEntry);
+ bool currentRFBExit = digitalRead(rfSensorBExit);
+ bool currentRFCEntry = digitalRead(rfSensorCEntry);
+ bool currentRFCExit = digitalRead(rfSensorCExit);
+ 
+ // Initialize takePhoto flag
+ bool takePhoto = false;
+ 
+ // Update car counters based on sensor readings
+ // Road A - Entry sensor (car enters the road)
+ if (prevRFAEntry == LOW && currentRFAEntry == HIGH) {
+   carsInRoadA++;
+   Serial.print("Road A Cars: ");
+   Serial.println(carsInRoadA);
+ }
+ 
+ // Road A - Exit sensor (car exits the road)
+ if (prevRFAExit == LOW && currentRFAExit == HIGH) {
+   if (carsInRoadA > 0) carsInRoadA--;
+   Serial.print("Road A Cars: ");
+   Serial.println(carsInRoadA);
+   
+   // Check for red light violation
+   if (digitalRead(trafficLightARed) == HIGH) {
+     takePhoto = true;
+   }
+ }
+ 
+ // Road B - Entry sensor
+ if (prevRFBEntry == LOW && currentRFBEntry == HIGH) {
+   carsInRoadB++;
+   Serial.print("Road B Cars: ");
+   Serial.println(carsInRoadB);
+ }
+ 
+ // Road B - Exit sensor
+ if (prevRFBExit == LOW && currentRFBExit == HIGH) {
+   if (carsInRoadB > 0) carsInRoadB--;
+   Serial.print("Road B Cars: ");
+   Serial.println(carsInRoadB);
+   
+   // Check for red light violation
+   if (digitalRead(trafficLightBRed) == HIGH) {
+     takePhoto = true;
+   }
+ }
+ 
+ // Road C - Entry sensor
+ if (prevRFCEntry == LOW && currentRFCEntry == HIGH) {
+   carsInRoadC++;
+   Serial.print("Road C Cars: ");
+   Serial.println(carsInRoadC);
+ }
+ 
+ // Road C - Exit sensor
+ if (prevRFCExit == LOW && currentRFCExit == HIGH) {
+   if (carsInRoadC > 0) carsInRoadC--;
+   Serial.print("Road C Cars: ");
+   Serial.println(carsInRoadC);
+   
+   // Check for red light violation
+   if (digitalRead(trafficLightCRed) == HIGH) {
+     takePhoto = true;
+   }
+ }
+ 
+ // Take photo if any condition is met
+ if (takePhoto) {
+   Serial.println("TAKE_PHOTO");
+ }
+ 
+ // Update previous sensor states
+ prevRFAEntry = currentRFAEntry;
+ prevRFAExit = currentRFAExit;
+ prevRFBEntry = currentRFBEntry;
+ prevRFBExit = currentRFBExit;
+ prevRFCEntry = currentRFCEntry;
+ prevRFCExit = currentRFCExit;
+}
+ 
